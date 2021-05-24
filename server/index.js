@@ -20,6 +20,7 @@ const appBuilder = require('./app-builder');
 const { AppType } = require('../shared/app');
 const bluebird = require('bluebird');
 const savePdf = require('./lib/pdf-export');
+const alertsEval = require('./services/alerts-eval');
 
 emCommonDefaults.setDefaults(em);
 
@@ -82,6 +83,8 @@ async function initAndStart() {
 
     log.info('Service', 'All services started');
     appBuilder.setReady();
+
+    alertsEval.run();
 }
 
 initAndStart().catch(err => {
