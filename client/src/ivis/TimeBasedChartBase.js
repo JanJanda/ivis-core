@@ -17,6 +17,12 @@ import * as dateMath from "../lib/datemath";
 import {Icon} from "../lib/bootstrap-components";
 import {withComponentMixins} from "../lib/decorator-helpers";
 import {withTranslation} from "../lib/i18n";
+import {areZoomTransformsEqual, ConfigDifference, setZoomTransform, transitionInterpolate, wheelDelta} from "./common";
+import * as d3Zoom from "d3-zoom";
+import commonStyles from "./commons.scss";
+import timeBasedChartBaseStyles from "./TimeBasedChartBase.scss";
+import {PropType_d3Color} from "../lib/CustomPropTypes";
+import {rangeAccessMixin} from "./RangeContext";
 
 export function createBase(base, self) {
     self.base = base;
@@ -59,7 +65,8 @@ class TooltipContent extends Component {
                             if (sigVals) {
                                 rows.push(
                                     <div key={`${sigSetIdx} ${sigIdx}`}>
-                                        <span className={tooltipStyles.signalColor} style={{color: sigConf.color}}><Icon icon="minus"/></span>
+                                        <span className={tooltipStyles.signalColor} style={{color: sigConf.color}}><Icon
+                                            icon="minus"/></span>
                                         <span className={tooltipStyles.signalLabel}>{sigConf.label}:</span>
                                         {this.props.getSignalValues(this, sigSetConf, sigConf, sigSetConf.cid, sigConf.cid, sel.data[sigConf.cid], isAgg)}
                                     </div>
@@ -91,15 +98,12 @@ export const RenderStatus = {
     SUCCESS: 0,
     NO_DATA: 1
 };
+export const XAxisType = {
+    DATETIME: "datetime",
+    NUMBER: "number",
+}
 
-
-
-export const ConfigDifference = {
-    // We assume here order from the most benign to the worst
-    NONE: 0,
-    RENDER: 1,
-    DATA: 2
-};
+export {ConfigDifference} from "./common";
 
 function compareConfigs(conf1, conf2, customComparator) {
     let diffResult = ConfigDifference.NONE;
@@ -165,10 +169,11 @@ function compareConfigs(conf1, conf2, customComparator) {
 @withComponentMixins([
     withTranslation,
     withErrorHandling,
-    intervalAccessMixin()
+    intervalAccessMixin(),
+    rangeAccessMixin,
 ])
 export class TimeBasedChartBase extends Component {
-    constructor(props){
+    constructor(props) {
         super(props);
 
         const t = props.t;
@@ -179,8 +184,12 @@ export class TimeBasedChartBase extends Component {
             mousePosition: null,
             signalSetsData: null,
             statusMsg: t('Loading...'),
-            width: 0
+            width: 0,
+            zoomTransform: d3Zoom.zoomIdentity,
+            loading: true,
+            brushInProgress: false,
         };
+        this.zoom = null;
 
         this.resizeListener = () => {
             this.createChart(this.state.signalSetsData);
@@ -188,6 +197,8 @@ export class TimeBasedChartBase extends Component {
         };
 
         this.delayedFetchDueToTimeIntervalChartWidthUpdate = false;
+
+        this.plotRectId = _.uniqueId("plotRect");
     }
 
     static propTypes = {
@@ -197,7 +208,12 @@ export class TimeBasedChartBase extends Component {
         height: PropTypes.number.isRequired,
         margin: PropTypes.object.isRequired,
         withBrush: PropTypes.bool,
+        drawBrushAreaBehindData: PropTypes.bool, // set to `true` if you need to use pointer (mouse) events on the drawn data. By default, the brush area is drawn on top of the data – it is not visible but it catches the events.
         withTooltip: PropTypes.bool,
+        withZoom: PropTypes.bool,
+        zoomUpdateReloadInterval: PropTypes.number, // milliseconds after the zoom ends; set to null to disable updates
+        loadingOverlayColor: PropType_d3Color(),
+        displayLoadingTextWhenUpdating: PropTypes.bool,
         tooltipContentComponent: PropTypes.func,
         tooltipContentRender: PropTypes.func,
 
@@ -208,6 +224,7 @@ export class TimeBasedChartBase extends Component {
         getGraphContent: PropTypes.func.isRequired,
         getSvgDefs: PropTypes.func,
         compareConfigs: PropTypes.func,
+        xAxisType: PropTypes.oneOf([XAxisType.DATETIME, XAxisType.NUMBER]).isRequired, // data type on the x-axis
 
         tooltipExtraProps: PropTypes.object,
 
@@ -219,64 +236,100 @@ export class TimeBasedChartBase extends Component {
     static defaultProps = {
         tooltipExtraProps: {},
         minimumIntervalMs: 10000,
-        getSvgDefs: () => null
+        getSvgDefs: () => null,
+        zoomUpdateReloadInterval: 1000,
+        displayLoadingTextWhenUpdating: true,
+        drawBrushAreaBehindData: false,
+        xAxisType: XAxisType.DATETIME,
     }
 
-    updateTimeIntervalChartWidth() {
-        const intv = this.getInterval();
-        const width = this.containerNode.getClientRects()[0].width;
+    updateTimeIntervalChartWidth() { // TODO: XAxisType.NUMBER – do we need to do anything?
+        if (this.props.xAxisType === XAxisType.DATETIME) {
+            const intv = this.getInterval();
+            const width = this.containerNode.getClientRects()[0].width;
 
-        if (this.props.controlTimeIntervalChartWidth && intv.conf.chartWidth !== width) {
-            intv.setConf({
-                chartWidth: width
-            });
+            if (this.props.controlTimeIntervalChartWidth && intv.conf.chartWidth !== width) {
+                intv.setConf({
+                    chartWidth: width
+                });
 
-            this.delayedFetchDueToTimeIntervalChartWidthUpdate = true;
+                this.delayedFetchDueToTimeIntervalChartWidthUpdate = true;
+            }
         }
     }
 
     componentDidMount() {
         window.addEventListener('resize', this.resizeListener);
+        window.addEventListener('keydown', ::this.keydownListener);
+        window.addEventListener('keyup', ::this.keyupListener);
 
         // This causes the absolute interval to change, which in turn causes a data fetch
         this.updateTimeIntervalChartWidth();
 
         if (!this.delayedFetchDueToTimeIntervalChartWidthUpdate) {
+            // noinspection JSIgnoredPromiseFromCall
             this.fetchData();
         }
 
         // this.createChart(this.state.signalSetsData) is not needed here because at this point, we are missing too many things to actually execute it
     }
 
+    // If control key is held down, brush should be enabled.
+    keydownListener(event) {
+        if (event.key === "Control" && !this.state.brushInProgress)
+            this.setState({brushInProgress: true});
+    }
+    keyupListener(event) {
+        if (event.key === "Control" && this.state.brushInProgress && !this.state.zoomInProgress)
+            this.setState({brushInProgress: false});
+    }
+
     componentDidUpdate(prevProps, prevState) {
         let signalSetsData = this.state.signalSetsData;
+        const xIsDate = this.props.xAxisType === XAxisType.DATETIME;
 
         const t = this.props.t;
 
         const configDiff = compareConfigs(prevProps.config, this.props.config, this.props.compareConfigs);
 
-        const prevAbs = this.getIntervalAbsolute(prevProps);
-        const prevSpec = this.getIntervalSpec(prevProps);
-        if (configDiff === ConfigDifference.DATA || prevSpec !== this.getIntervalSpec()) {
+        // compare time intervals or ranges
+        const absIntervalDiffers = xIsDate
+            ? this.getIntervalAbsolute(prevProps) !== this.getIntervalAbsolute()
+            : false;
+        const specDiffers = xIsDate
+            ? this.getIntervalSpec(prevProps) !== this.getIntervalSpec()
+            : this.getRange(prevProps) !== this.getRange();
+
+        if (configDiff === ConfigDifference.DATA) {
             this.setState({
-                signalSetsData: null,
-                statusMsg: t('Loading...')
+                signalSetsData: null
             });
+            this.zoom = null;
 
+            // noinspection JSIgnoredPromiseFromCall
             this.fetchData();
-
             signalSetsData = null;
 
-        } else if (this.delayedFetchDueToTimeIntervalChartWidthUpdate || prevAbs !== this.getIntervalAbsolute()) { // If its just a regular refresh, don't clear the chart
+        } else if (specDiffers) {
+            this.zoom = null;
+            // noinspection JSIgnoredPromiseFromCall
+            this.fetchData();
+        } else if (this.delayedFetchDueToTimeIntervalChartWidthUpdate || absIntervalDiffers) { // If its just a regular refresh, don't clear the chart
             this.delayedFetchDueToTimeIntervalChartWidthUpdate = false;
 
+            if (!areZoomTransformsEqual(this.state.zoomTransform, d3Zoom.zoomIdentity)) // update time interval based on what is currently visible
+                this.setInterval(...this.xScaleDomain);
+
+            // noinspection JSIgnoredPromiseFromCall
             this.fetchData();
 
         } else {
             const forceRefresh = this.prevContainerNode !== this.containerNode
                 || prevState.signalSetsData !== this.state.signalSetsData
                 || configDiff !== ConfigDifference.NONE
-                || this.getIntervalAbsolute(prevProps) !== this.getIntervalAbsolute();
+                || absIntervalDiffers
+                || prevState.brushInProgress !== this.state.brushInProgress
+                || !areZoomTransformsEqual(prevState.zoomTransform, this.state.zoomTransform);
 
             this.createChart(signalSetsData, forceRefresh);
             this.prevContainerNode = this.containerNode;
@@ -285,14 +338,24 @@ export class TimeBasedChartBase extends Component {
 
     componentWillUnmount() {
         window.removeEventListener('resize', this.resizeListener);
+        window.removeEventListener('keydown', ::this.keydownListener);
+        window.removeEventListener('keyup', ::this.keyupListener);
+        clearTimeout(this.zoomUpdateReloadTimeoutID);
     }
 
     @withAsyncErrorHandler
     async fetchData() {
         const t = this.props.t;
+        const newState = { loading: true }
+        if (this.props.displayLoadingTextWhenUpdating)
+            newState.statusMsg = t('Loading...');
+        this.setState(newState);
 
         try {
-            const queries = this.props.getQueries(this, this.getIntervalAbsolute(), this.props.config);
+            const interval = this.props.xAxisType === XAxisType.DATETIME
+                ? this.getIntervalAbsolute()
+                : this.getRange();
+            const queries = this.props.getQueries(this, interval, this.props.config);
 
             const results = await this.dataAccessSession.getLatestMixed(queries);
 
@@ -329,7 +392,13 @@ export class TimeBasedChartBase extends Component {
                     }
                 }
 
-                this.setState(this.props.prepareData(this, results));
+                this.setState({signalSetsData: null}, () =>
+                    this.setState({
+                        statusMsg: "",
+                        ...this.props.prepareData(this, results),
+                        loading: false
+                    })
+                );
             }
         } catch (err) {
             if (err instanceof interoperableErrors.TooManyPointsError) {
@@ -338,15 +407,18 @@ export class TimeBasedChartBase extends Component {
                 });
                 return;
             }
+            this.setState({statusMsg: t("Error loading data.")});
 
             throw err;
+        } finally {
+            this.setState({loading: false});
         }
     }
 
     createChart(signalSetsData, forceRefresh) {
         const t = this.props.t;
         const self = this;
-        const intv = this.getInterval();
+        const xIsDate = this.props.xAxisType === XAxisType.DATETIME;
 
         const width = this.containerNode.getClientRects()[0].width;
 
@@ -360,27 +432,48 @@ export class TimeBasedChartBase extends Component {
             return;
         }
         this.renderedWidth = width;
+        const innerWidth = width - this.props.margin.left - this.props.margin.right;
+        const innerHeight = this.props.height - this.props.margin.top - this.props.margin.bottom;
 
         if (!signalSetsData) {
             return;
         }
 
-        const abs = this.getIntervalAbsolute();
-
-        const xScale = d3Scale.scaleTime()
-            .domain([abs.from, abs.to])
-            .range([0, width - this.props.margin.left - this.props.margin.right]);
+        let xScale;
+        let interval;
+        if (xIsDate) {
+            const abs = this.getIntervalAbsolute();
+            interval = abs;
+            xScale = this.state.zoomTransform.rescaleX(
+                d3Scale.scaleTime()
+                    .domain([abs.from, abs.to])
+                    .range([0, innerWidth])
+            );
+        } else {
+            const range = this.getRange();
+            interval = range;
+            xScale = this.state.zoomTransform.rescaleX(
+                d3Scale.scaleLinear()
+                    .domain(range)
+                    .range([0, innerWidth])
+            );
+        }
+        this.xScaleDomain = xScale.domain().map(d => d.valueOf());
 
         const xAxis = d3Axis.axisBottom(xScale)
             .tickSizeOuter(0);
-
+        if (this.props.xAxisTicksCount) xAxis.ticks(this.props.xAxisTicksCount);
+        if (this.props.xAxisTicksFormat) xAxis.tickFormat(this.props.xAxisTicksFormat);
         this.xAxisSelection
             .call(xAxis);
 
-
         if (this.props.withBrush) {
             const brush = d3Brush.brushX()
-                .extent([[0, 0], [width - this.props.margin.left - this.props.margin.right, this.props.height - this.props.margin.top - this.props.margin.bottom]])
+                .extent([[0, 0], [innerWidth, innerHeight]])
+                .filter(() => { // TODO what to do when withZoom == false
+                    // noinspection JSUnresolvedVariable
+                    return d3Event.ctrlKey && !d3Event.button; // enable brush only when ctrl is pressed, modified version of default brush filter (https://github.com/d3/d3-brush#brush_filter)
+                })
                 .on("end", function brushed() {
                     const sel = d3Event.selection;
 
@@ -388,19 +481,7 @@ export class TimeBasedChartBase extends Component {
                         const selFrom = xScale.invert(sel[0]).valueOf();
                         let selTo = xScale.invert(sel[1]).valueOf();
 
-                        if (selTo - selFrom < self.props.minimumIntervalMs) {
-                            selTo = selFrom + self.props.minimumIntervalMs;
-                        }
-
-                        const rounded = intv.roundToMinAggregationInterval(selFrom, selTo);
-
-                        const spec = new IntervalSpec(
-                            rounded.from,
-                            rounded.to,
-                            null
-                        );
-
-                        intv.setSpec(spec);
+                        self.setInterval(selFrom, selTo);
 
                         self.brushSelection.call(brush.move, null);
                     }
@@ -419,11 +500,13 @@ export class TimeBasedChartBase extends Component {
                 .attr('cursor', 'crosshair')
                 .attr('x', 0)
                 .attr('y', 0)
-                .attr('width', width - this.props.margin.left - this.props.margin.right)
-                .attr('height', this.props.height - this.props.margin.top - this.props.margin.bottom)
+                .attr('width', innerWidth)
+                .attr('height', innerHeight)
                 .attr('visibility', 'hidden');
         }
 
+        if (this.props.withZoom)
+            this.createChartZoom();
 
         this.cursorLineVisible = false;
         this.cursorSelection
@@ -431,11 +514,97 @@ export class TimeBasedChartBase extends Component {
             .attr('y2', this.props.height - this.props.margin.bottom);
 
 
-        const renderStatus = this.props.createChart(this, signalSetsData, this.state, abs, xScale);
+        const renderStatus = this.props.createChart(this, signalSetsData, this.state, interval, xScale);
 
-        if (renderStatus == RenderStatus.NO_DATA) {
-            this.statusMsgSelection.text(t('No data.'));
+        if (renderStatus === RenderStatus.NO_DATA && this.state.statusMsg === "")
+            this.setState({statusMsg: t('No data.')});
+    }
+
+    setInterval(from, to) {
+        if (this.props.xAxisType === XAxisType.DATETIME) {
+            const intv = this.getInterval();
+
+            if (to - from < this.props.minimumIntervalMs) {
+                to = from + this.props.minimumIntervalMs;
+            }
+
+            const rounded = intv.roundToMinAggregationInterval(from, to);
+
+            const spec = new IntervalSpec(
+                rounded.from,
+                rounded.to,
+                null
+            );
+
+            intv.setSpec(spec);
+        } else {
+            this.setRange([from, to]);
         }
+    }
+
+    createChartZoom() {
+        const self = this;
+
+        const handleZoom = function () {
+            // noinspection JSUnresolvedVariable
+            if (d3Event.sourceEvent && d3Event.sourceEvent.type === "wheel") {
+                transitionInterpolate(self.containerNodeSelection, self.state.zoomTransform, d3Event.transform, setZoomTransform(self));
+            } else {
+                // noinspection JSUnresolvedVariable
+                self.setState({zoomTransform: d3Event.transform});
+            }
+        };
+
+        const handleZoomStart = function () {
+            clearTimeout(self.zoomUpdateReloadTimeoutID);
+        };
+
+        const handleZoomEnd = function () {
+            // noinspection JSUnresolvedVariable
+            if (self.props.zoomUpdateReloadInterval === null || self.props.zoomUpdateReloadInterval === undefined) // don't update automatically
+                return;
+            // noinspection JSUnresolvedVariable
+            if (!Object.is(d3Event.transform, d3Zoom.zoomIdentity))
+                if (self.props.zoomUpdateReloadInterval > 0) {
+                    clearTimeout(self.zoomUpdateReloadTimeoutID);
+                    self.zoomUpdateReloadTimeoutID = setTimeout(() => {
+                        self.setInterval(...self.xScaleDomain)
+                    }, self.props.zoomUpdateReloadInterval);
+                } else if (self.props.zoomUpdateReloadInterval >= 0)
+                    self.setInterval(...self.xScaleDomain);
+        };
+
+        const ySize = this.props.height - this.props.margin.top - this.props.margin.bottom;
+        const zoomExtent = [[0, 0], [this.renderedWidth - this.props.margin.left - this.props.margin.right, ySize]];
+        const translateExtent = [[-Infinity, 0], [Infinity, this.props.height - this.props.margin.top - this.props.margin.bottom]];
+        const zoomExisted = this.zoom !== null;
+        this.zoom = zoomExisted ? this.zoom : d3Zoom.zoom();
+        this.zoom
+            .translateExtent(translateExtent)
+            .extent(zoomExtent)
+            .on("zoom", handleZoom)
+            .on("end", handleZoomEnd)
+            .on("start", handleZoomStart)
+            .wheelDelta(wheelDelta(3))
+            .filter(() => {
+                if (d3Event.type === "wheel" && !d3Event.shiftKey)
+                    return false;
+                return !d3Event.ctrlKey && !d3Event.button;
+            });
+        this.containerNodeSelection.call(this.zoom);
+        if (!zoomExisted)
+            this.resetZoom(); // this is called after data are reloaded
+    }
+
+    setZoom(transform) {
+        if (this.props.withZoom && this.zoom)
+            this.containerNodeSelection.call(this.zoom.transform, transform);
+        else
+            this.setState({zoomTransform: transform})
+    }
+
+    resetZoom() {
+        this.setZoom(d3Zoom.zoomIdentity);
     }
 
     render() {
@@ -444,7 +613,9 @@ export class TimeBasedChartBase extends Component {
         if (!this.state.signalSetsData) {
             return (
                 <svg ref={node => this.containerNode = node} height={this.props.height} width="100%">
-                    <text textAnchor="middle" x="50%" y="50%" fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px">
+                    <text textAnchor="middle" x="50%" y="50%"
+                          fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px"
+                          fill="currentColor">
                         {this.state.statusMsg}
                     </text>
                 </svg>
@@ -468,42 +639,81 @@ export class TimeBasedChartBase extends Component {
             const tooltipExtraProps = {...this.props.tooltipExtraProps};
 
             if (this.props.tooltipContentComponent) {
-                tooltipExtraProps.contentComponent = tooltipContentComponent;
-            } else if (this.props.contentRender) {
-                tooltipExtraProps.contentRender = tooltipContentRender;
+                tooltipExtraProps.contentComponent = this.props.tooltipContentComponent;
+            } else if (this.props.tooltipContentRender) {
+                tooltipExtraProps.contentRender = this.props.tooltipContentRender;
             } else {
-                tooltipExtraProps.contentRender = (props) => <TooltipContent getSignalValues={this.props.getSignalValuesForDefaultTooltip} {...props}/>;
+                tooltipExtraProps.contentRender = (props) => <TooltipContent
+                    getSignalValues={this.props.getSignalValuesForDefaultTooltip} {...props}/>;
             }
-
-
+            
             return (
-                <svg id="cnt" ref={node => this.containerNode = node} height={this.props.height} width="100%">
+                <svg id="cnt" ref={node => {
+                    this.containerNode = node;
+                    this.containerNodeSelection = select(node)
+                }} height={this.props.height} width="100%">
+
+                    {/* SVG definitions */}
                     {this.props.getSvgDefs(this)}
                     <defs>
-                        <clipPath id="plotRect">
-                            <rect x="0" y="0" width={this.state.width - this.props.margin.left - this.props.margin.right} height={this.props.height - this.props.margin.top - this.props.margin.bottom} />
+                        <clipPath id={this.plotRectId}>
+                            <rect x="0" y="0"
+                                  width={this.state.width - this.props.margin.left - this.props.margin.right}
+                                  height={this.props.height - this.props.margin.top - this.props.margin.bottom}/>
                         </clipPath>
                     </defs>
-                    <g transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`} clipPath="url(#plotRect)" >
+
+                    {/* brush (if drawn behind data) */}
+                    { (this.props.drawBrushAreaBehindData && !this.state.brushInProgress) &&
+                    <g ref={node => this.brushSelection = select(node)}
+                       transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>}
+
+                    {/* main graph content */}
+                    <g transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}
+                       clipPath={`url(#${this.plotRectId})`} ref={node => this.GraphContentSelection = select(node)}>
+                        {(!areZoomTransformsEqual(this.state.zoomTransform, d3Zoom.zoomIdentity) || this.state.loading) &&
+                            <rect className={timeBasedChartBaseStyles.loadingOverlay}
+                                  style={{fill: this.props.loadingOverlayColor }}
+                            />
+                        }
                         {this.props.getGraphContent(this)}
                     </g>
-                    <g ref={node => this.xAxisSelection = select(node)} transform={`translate(${this.props.margin.left}, ${this.props.height - this.props.margin.bottom})`}/>
-                    <g ref={node => this.yAxisSelection = select(node)} transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>
-                    <line ref={node => this.cursorSelection = select(node)} strokeWidth="1" stroke="rgb(50,50,50)" visibility="hidden"/>
-                    <text ref={node => this.statusMsgSelection = select(node)} textAnchor="middle" x="50%" y="50%" fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px"/>
-                    {this.props.withTooltip &&
-                        <Tooltip
-                            config={this.props.config.signalSets}
-                            signalSetsData={this.state.signalSetsData}
-                            containerHeight={this.props.height}
-                            containerWidth={this.state.width}
-                            mousePosition={this.state.mousePosition}
-                            selection={this.state.selection}
-                            {...tooltipExtraProps}
-                        />
-                    }
+
+                    {/* axes */}
+                    <g ref={node => this.xAxisSelection = select(node)}
+                       transform={`translate(${this.props.margin.left}, ${this.props.height - this.props.margin.bottom})`}/>
+                    <g ref={node => this.yAxisSelection = select(node)}
+                       transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>
+
+                    {/* cursor line */}
+                    <line ref={node => this.cursorSelection = select(node)} className={commonStyles.cursorLine}
+                          pointerEvents="none" visibility="hidden"/>
+
+                    {/* status message */}
+                    <text textAnchor="middle" x="50%" y="50%"
+                          fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px"
+                          fill="currentColor">
+                        {this.state.statusMsg}
+                    </text>
+
+                    {/* tooltip */}
+                    {this.props.withTooltip && !this.state.brushInProgress &&
+                    <Tooltip
+                        config={this.props.config.signalSets}
+                        signalSetsData={this.state.signalSetsData}
+                        containerHeight={this.props.height}
+                        containerWidth={this.state.width}
+                        mousePosition={this.state.mousePosition}
+                        selection={this.state.selection}
+                        {...tooltipExtraProps}
+                    />}
+
                     {content}
-                    <g ref={node => this.brushSelection = select(node)} transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>
+
+                    {/* brush (default) */}
+                    { (!this.props.drawBrushAreaBehindData || this.state.brushInProgress) &&
+                    <g ref={node => this.brushSelection = select(node)}
+                       transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>}
                 </svg>
             );
         }

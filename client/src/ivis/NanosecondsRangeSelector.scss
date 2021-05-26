@@ -1,0 +1,50 @@
+.headingDescription {
+  float: left;
+}
+
+.headingButtons {
+  float: right;
+
+  & > * {
+    margin-right: 15px;
+  }
+
+  & > *:last-child {
+    margin-right: 0px;
+  }
+}
+
+.nanosecondsSelector {
+  padding-left: 25px;
+  padding-right: 25px;
+}
+
+.selectorRow {
+  margin-bottom: 10px;
+}
+
+.timeSelectLabel {
+  width: 100px;
+}
+
+.timeSelectLabelCombined {
+  width: 120px;
+  margin-left: 25px;
+}
+
+.timeSelectInput {
+  width: 130px;
+  margin-right: 20px
+}
+
+.timeSelectInputCombined {
+  width: 170px;
+}
+
+.cursorZoomIn{
+  cursor: zoom-in;
+}
+
+.cursorZoomOut{
+  cursor: zoom-out;
+}

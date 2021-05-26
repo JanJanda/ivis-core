@@ -7,6 +7,9 @@ import * as d3Selection from "d3-selection";
 import * as d3Interpolate from "d3-interpolate";
 import * as d3Zoom from "d3-zoom";
 
+export const ZoomEventSources = ["mousemove", "dblclick", "wheel", "touchstart", "touchmove" ]; // source: https://github.com/d3/d3-zoom#api-reference (table with events - causing "zoom" event)
+export {curveVerticalStep} from "../lib/d3-shape_step_vertical";
+
 /**
  * Adds margin to extent in format of d3.extent()
  */
@@ -62,7 +65,7 @@ export function getColorScale(domain, colors) {
         .range(colors);
 }
 
-export function ModifyColorCopy(color, new_opacity) {
+export function modifyColorCopy(color, new_opacity) {
     color = d3Color.color(color);
     // noinspection JSIncompatibleTypesComparison
     if (color === null)
@@ -109,7 +112,7 @@ export function brushHandlesTopBottom(group, selection, xSize) {
 }
 
 /** https://github.com/d3/d3-zoom#zoom_wheelDelta with multiplied values */
-export function WheelDelta(multiplier = 2) {
+export function wheelDelta(multiplier = 2) {
     return () => -d3Selection.event.deltaY * multiplier * (d3Selection.event.deltaMode === 1 ? 0.05 : d3Selection.event.deltaMode ? 1 : 0.002);
 }
 
@@ -140,4 +143,99 @@ export function setZoomTransform(self, setStateCallback) {
     }
 }
 
-export const ZoomEventSources = ["mousemove", "dblclick", "wheel", "touchstart", "touchmove" ]; // source: https://github.com/d3/d3-zoom#api-reference (table with events - causing "zoom" event)
+
+export function areZoomTransformsEqual(a, b, scale_epsilon = 0.001, translate_epsilon = 0.01) {
+    if (!(a.hasOwnProperty("x") && a.hasOwnProperty("y") && a.hasOwnProperty("k"))) return false;
+    if (!(b.hasOwnProperty("x") && b.hasOwnProperty("y") && b.hasOwnProperty("k"))) return false;
+    if (Math.abs(a.k - b.k) > scale_epsilon) return false;
+    if (Math.abs(a.x - b.x) > translate_epsilon) return false;
+    if (Math.abs(a.y - b.y) > translate_epsilon) return false;
+    return true;
+}
+
+/**
+ * Helper function to draw a set of rectangles to a D3 selection
+ * @param data - array of values
+ * @param selection - D3 selection
+ * @param x_position - value or function (evaluated with each datum)
+ * @param y_position - value or function (evaluated with each datum)
+ * @param width - value or function (evaluated with each datum)
+ * @param height - value or function (evaluated with each datum)
+ * @param color - color of bars - value or function (evaluated with each datum)
+ * @param key - see https://github.com/d3/d3-selection#selection_data
+ */
+export function drawBars(data, selection, x_position, y_position, width, height, color, key) {
+    const bars = selection
+        .selectAll('rect')
+        .data(data, key || (d => d));
+
+    bars.enter()
+        .append('rect')
+        .merge(bars)
+        .attr('x', x_position)
+        .attr('y', y_position)
+        .attr("width", width)
+        .attr("height", height)
+        .attr("fill", color);
+
+    bars.exit()
+        .remove();
+}
+
+
+export const ConfigDifference = {
+    // We assume here order from the most benign to the worst
+    NONE: 0,
+    RENDER: 1,
+    DATA: 2,
+    DATA_WITH_CLEAR: 3
+};
+
+/**
+ * Test if time interval changed
+ * @param self          the chart object, must use the intervalAccessMixin
+ * @returns {number}    ConfigDifference
+ */
+export function timeIntervalDifference(self, props) {
+    const prevAbs = self.getIntervalAbsolute(props);
+    const prevSpec = self.getIntervalSpec(props);
+
+    if (prevSpec !== self.getIntervalSpec()) {
+        return ConfigDifference.DATA_WITH_CLEAR;
+    } else if (prevAbs !== self.getIntervalAbsolute()) { // If its just a regular refresh, don't clear the chart
+        return ConfigDifference.DATA;
+    }
+    return ConfigDifference.NONE;
+}
+
+/**
+ * Gets a contrasting text color for the `backgroundColor`.
+ * Based on https://stackoverflow.com/a/3943023
+ */
+export function getTextColor(backgroundColor) {
+    const {r, g, b} = d3Color.rgb(backgroundColor);
+    if (r * 0.299 + g * 0.587 + b * 0.114 > 186) {
+        return d3Color.color('black');
+    } else {
+        return d3Color.color('white');
+    }
+}
+
+/**
+ * Gets a contrasting text color for the `backgroundColor`.
+ * Based on https://www.w3.org/TR/WCAG20/ via https://stackoverflow.com/a/3943023
+ */
+export function getTextColorW3C(backgroundColor) {
+    let {r, g, b} = d3Color.rgb(backgroundColor);
+    const colorTerm = (c) => {
+        c /= 255;
+        if (c <= 0.03928) return c/12.92;
+        else return Math.pow((c+0.055)/1.055, 2.4);
+    }
+    const L = colorTerm(r) * 0.2126 + colorTerm(g) * 0.7152 + colorTerm(b) * 0.0722;
+    if (L > 0.179) {
+        return d3Color.color('black');
+    } else {
+        return d3Color.color('white');
+    }
+}

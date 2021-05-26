@@ -12,6 +12,7 @@ import {
 } from "../../lib/error-handling";
 import {withComponentMixins} from "../../lib/decorator-helpers";
 import {withTranslation} from "../../lib/i18n";
+import RunConsole from "./RunConsole";
 
 @withComponentMixins([
     withTranslation,
@@ -19,12 +20,7 @@ import {withTranslation} from "../../lib/i18n";
     withPageHelpers,
     requiresAuthenticatedUser
 ])
-export default class List extends Component {
-    constructor(props) {
-        super(props);
-
-        this.state = {};
-    }
+export default class RunOutput extends Component {
 
     render() {
         const t = this.props.t;
@@ -32,7 +28,7 @@ export default class List extends Component {
 
         return (
             <Panel title={t('Output of run ') + run.id}>
-                <pre><code>{run.output}</code></pre>
+                <RunConsole jobId={run.job} runId={run.id}/>
             </Panel>
         );
     }

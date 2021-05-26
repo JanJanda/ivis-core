@@ -21,8 +21,6 @@ export default class Sidebar extends Component {
     render() {
         const settings = [];
         const t = this.props.t;
-        
-        em.invoke('client.settings.installSettings', settings, t);
 
         if (ivisConfig.globalPermissions.showGlobalSettings)
             settings.push(<NavLink key='global' to="/settings/global" icon="cog">{t('Global settings')}</NavLink>);
@@ -50,6 +48,8 @@ export default class Sidebar extends Component {
 
         if (ivisConfig.globalPermissions.showAdminAlerts)
             settings.push(<NavLink key='alerts' to="/settings/alerts" icon="bell">{t('Alerts')}</NavLink>);
+
+        em.invoke('client.settings.installSettings', settings, t);
 
         return (
             <>

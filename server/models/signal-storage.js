@@ -25,7 +25,9 @@ const fieldTypes = {
     [SignalType.BOOLEAN]: 'tinyint',
     [SignalType.KEYWORD]: 'varchar(255)',
     [SignalType.TEXT]: 'longtext',
-    [SignalType.DATE_TIME]: 'datetime(6)'
+    [SignalType.DATE_TIME]: 'datetime(6)',
+    [SignalType.JSON]: 'json',
+    [SignalType.BLOB]: 'longblob',
 };
 
 async function createStorage(sigSet) {

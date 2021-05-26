@@ -22,10 +22,11 @@ import {NamespaceSelect, validateNamespace} from "../../lib/namespace";
 import {DeleteModalDialog} from "../../lib/modals";
 import {Panel} from "../../lib/panel";
 import ivisConfig from "ivisConfig";
-import {WizardType, getWizard, getWizardsForType} from "./wizards";
-import {TaskType, subtypesByType, taskSubtypeSpecs} from "../../../../shared/tasks";
+import {TaskType, subtypesByType} from "../../../../shared/tasks";
 import {withComponentMixins} from "../../lib/decorator-helpers";
 import {withTranslation} from "../../lib/i18n";
+import {getSubtypeLabel} from "./types";
+import {getWizardsForType, WizardType} from "./wizards";
 
 @withComponentMixins([
     withTranslation,
@@ -41,6 +42,7 @@ export default class CUD extends Component {
         this.state = {};
 
         this.initForm();
+        this.submitHandler = ::this.submitHandler;
     }
 
     static propTypes = {
@@ -57,7 +59,7 @@ export default class CUD extends Component {
                 description: '',
                 namespace: ivisConfig.user.namespace,
                 type: TaskType.PYTHON,
-                subtype: null,
+                subtype: '',
                 wizard: WizardType.BLANK
             });
         }
@@ -88,14 +90,9 @@ export default class CUD extends Component {
 
     submitFormValuesMutator(data) {
         if (!this.props.entity) {
-            const wizardData = getWizard(data.type, data.wizard);
-            if (wizardData) {
-                wizardData.wizard(data);
-            } else {
-                data.settings = {
-                    params: [],
-                    code: ''
-                };
+            data.settings = {
+                params: [],
+                code: ''
             }
 
             if (data.subtype) {
@@ -111,7 +108,8 @@ export default class CUD extends Component {
             'description',
             'type',
             'settings',
-            'namespace'
+            'namespace',
+            'wizard'
         ]);
     }
 
@@ -183,7 +181,7 @@ export default class CUD extends Component {
             Object.values(subtypes).forEach((subtype) => {
                 subtypeOptions.push({
                     key: subtype,
-                    label: t(taskSubtypeSpecs[TaskType.PYTHON][subtype].label)
+                    label: getSubtypeLabel(t, taskType, subtype)
                 });
             });
         }
@@ -195,7 +193,7 @@ export default class CUD extends Component {
                 Object.entries(wizardsForType).forEach((entry) => {
                     wizardOptions.push({
                         key: entry[0],
-                        label: t(entry[1].label)
+                        label: t(entry[1])
                     });
                 });
             }
@@ -216,7 +214,7 @@ export default class CUD extends Component {
                     deletedMsg={t('Task deleted')}/>
                 }
 
-                <Form stateOwner={this} onSubmitAsync={::this.submitHandler}>
+                <Form stateOwner={this} onSubmitAsync={this.submitHandler}>
                     <InputField id="name" label={t('Name')}/>
                     <TextArea id="description" label={t('Description')} help={t('HTML is allowed')}/>
                     <Dropdown id="type" label={t('Type')} options={typeOptions} disabled={isEdit}/>

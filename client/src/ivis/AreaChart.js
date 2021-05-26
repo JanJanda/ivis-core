@@ -5,7 +5,7 @@ import {
     isSignalVisible,
     RenderStatus
 } from "./TimeBasedChartBase";
-import {getAxisIdx, LineChartBase} from "./LineChartBase";
+import {getAxisIdx, LineChartBase, lineWithoutPoints} from "./LineChartBase";
 import {select} from "d3-selection";
 import * as d3Shape
     from "d3-shape";
@@ -17,6 +17,7 @@ import tooltipStyles
 import {format as d3Format} from "d3-format";
 import {withComponentMixins} from "../lib/decorator-helpers";
 import {withTranslation} from "../lib/i18n";
+import {PropType_d3Color} from "../lib/CustomPropTypes";
 
 function getSignalValuesForDefaultTooltip(tooltipContent, sigSetConf, sigConf, sigSetCid, sigCid, signalData) {
     const numberFormat = d3Format('.3f');
@@ -54,9 +55,15 @@ export class AreaChart extends Component {
         margin: PropTypes.object,
         withTooltip: PropTypes.bool,
         withBrush: PropTypes.bool,
+        withZoom: PropTypes.bool,
+        zoomUpdateReloadInterval: PropTypes.number, // milliseconds after the zoom ends; set to null to disable updates
+        loadingOverlayColor: PropType_d3Color(),
+        displayLoadingTextWhenUpdating: PropTypes.bool,
         tooltipContentComponent: PropTypes.func,
         tooltipContentRender: PropTypes.func,
+        tooltipExtraProps: PropTypes.object,
         lineCurve: PropTypes.func,
+        discontinuityInterval: PropTypes.number, // if two data points are further apart than this interval (in seconds), the lines are split into segments
     }
 
     static defaultProps = {
@@ -76,6 +83,7 @@ export class AreaChart extends Component {
                         const yScale = yScales[getAxisIdx(sigConf)];
 
                         const minMaxArea = d3Shape.area()
+                            .defined(d => d !== null)
                             .x(d => xScale(d.ts))
                             .y0(d => yScale(0))
                             .y1(d => yScale(d.data[sigCid].max))
@@ -127,11 +135,19 @@ export class AreaChart extends Component {
                 getSignalGraphContent={(base, sigSetCid, sigCid) => <path ref={node => this.areaPathSelection[sigSetCid][sigCid] = select(node)}/>}
                 withTooltip={props.withTooltip}
                 withBrush={props.withBrush}
+                withZoom={props.withZoom}
+                zoomUpdateReloadInterval={props.zoomUpdateReloadInterval}
                 contentComponent={props.contentComponent}
                 contentRender={props.contentRender}
                 tooltipContentComponent={this.props.tooltipContentComponent}
                 tooltipContentRender={this.props.tooltipContentRender}
+                tooltipExtraProps={this.props.tooltipExtraProps}
+                getLineColor={color => color.darker()}
+                lineVisibility={lineWithoutPoints}
                 lineCurve={this.props.lineCurve}
+                discontinuityInterval={this.props.discontinuityInterval}
+                loadingOverlayColor={this.props.loadingOverlayColor}
+                displayLoadingTextWhenUpdating={this.props.displayLoadingTextWhenUpdating}
             />
         );
     }

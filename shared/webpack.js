@@ -7,12 +7,19 @@ const externalsLibs = [
     'prop-types',
     'd3-color',
     'd3-format',
-    'd3-selection'
+    'd3-selection',
+    'd3-array',
+    'd3-axis',
+    'd3-scale',
+    'd3-shape',
+    'd3-scale-chromatic',
 ];
 
 const internalLibs = {
     'axios': 'lib/axios',
-    'ivis': 'ivis/ivis'
+    'ivis': 'ivis/ivis',
+    'decorator-helpers': 'lib/decorator-helpers',
+    'bootstrap-components': 'lib/bootstrap-components',
 };
 
 const libs = [];
