@@ -3,6 +3,7 @@ cd ${SCRIPT_PATH}/..
 
 productId=${productId:-"ivis-core"}
 productLabel=${productLabel:-"IVIS Core"}
+ivisCorePath=${ivisCorePath:-"."}
 
 case "$hostType" in
     centos8|centos8-aws)
@@ -160,6 +161,26 @@ EOF
 }
 
 
+function installTasksPrerequisities {
+    case "$hostType" in
+        centos8-aws|centos8-minimal)
+            dnf -y install git python3 python3-pip
+            ;;
+
+        centos7-aws|centos7-minimal)
+            yum -y install git python3 python3-pip
+            ;;
+
+        ubuntu1804)
+            apt-get install -y git python3 python3-pip python3-venv
+            ;;
+    esac
+
+    # Install 'ivis' library for tasks
+    python3 -m pip install --user --upgrade setuptools wheel
+    (cd "$ivisCorePath/server/lib/tasks/python/ivis" && python3 setup.py sdist bdist_wheel)
+}
+
 
 function installPrerequisities {
     # Run as root!
@@ -170,11 +191,11 @@ function installPrerequisities {
 
     case "$hostType" in
         centos8-aws|centos8-minimal)
-            yum -y install epel-release
+            dnf -y install epel-release
 
-            curl --silent --location https://rpm.nodesource.com/setup_13.x | bash -
+            curl --silent --location https://rpm.nodesource.com/setup_14.x | bash -
 
-            yum -y install mariadb-server nodejs redis pwgen gcc-c++ make bzip2 java-1.8.0-openjdk git libXScrnSaver at-spi2-atk gtk3
+            dnf -y install mariadb-server nodejs redis pwgen gcc-c++ make bzip2 java-1.8.0-openjdk git libXScrnSaver at-spi2-atk gtk3
             rpm -Uhv --force https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-6.6.1.rpm
             ;;
 
@@ -188,6 +209,7 @@ function installPrerequisities {
             ;;
 
         ubuntu1804)
+            apt-get install -y curl
             curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash -
             apt-get install -y mariadb-server nodejs redis pwgen g++ make bzip2 openjdk-8-jre git libatk-bridge2.0 libgtk-3-0
 			TEMP_DEB="$(mktemp)"
@@ -197,6 +219,7 @@ function installPrerequisities {
             ;;
     esac
 
+    installTasksPrerequisities
 
     systemctl start mariadb
     systemctl enable mariadb
@@ -284,7 +307,6 @@ log:
 
 $apiCerts
 EOT
-    
 
     reinstallAllModules
 
@@ -325,7 +347,10 @@ function installHttpd {
             systemctl start httpd
             systemctl enable httpd
 
-            setsebool -P httpd_can_network_connect 1
+            # setsebool fails if selinux is not active
+            if [ -x "$(command -v getenforce)" ] && [ "$(getenforce)" != "Disabled" ]; then
+              setsebool -P httpd_can_network_connect 1
+            fi
 
             if [ "$firewallCmdExists" == "true" ]; then
                 # Enable SSL ports on the firewall
@@ -337,7 +362,7 @@ function installHttpd {
                     firewall-cmd --add-port=${portAPI}/tcp --permanent
                 fi
 
-                # Activate the firefall settings
+                # Activate the firewall settings
                 firewall-cmd --reload
             fi
             ;;
@@ -469,18 +494,10 @@ function createCertificates {
     local hostAPI="$3"
     local email="$4"
 
-    local certbotBin="certbot"
-    local certbotPath="/usr/bin/"
-
     case "$hostType" in
         centos8-aws|centos8-minimal)
-            #
-            certbotPath="/usr/local/bin/"
-            certbotBin="certbot-auto"
-
-            curl -O https://dl.eff.org/certbot-auto
-            mv certbot-auto "${certbotPath}${certbotBin}"
-            chmod 0755 "${certbotPath}${certbotBin}"
+            dnf -y install epel-release
+            dnf -y install certbot python3-certbot-apache mod_ssl
             ;;
 
         centos7-aws|centos7-minimal)
@@ -494,13 +511,13 @@ function createCertificates {
 
     # The --expand flag is to support cases when an existing installation is just being reconfigured
     if [ -n "${hostAPI}" ]; then
-        "${certbotBin}" certonly --agree-tos --email "${email}" --webroot --webroot-path /var/www/html --expand -n -d "${hostTrusted}" -d "${hostSandbox}" -d "${hostAPI}"
+        certbot certonly --agree-tos --email "${email}" --webroot --webroot-path /var/www/html --expand -n -d "${hostTrusted}" -d "${hostSandbox}" -d "${hostAPI}"
     else
-        "${certbotBin}" certonly --agree-tos --email "${email}" --webroot --webroot-path /var/www/html --expand -n -d "${hostTrusted}" -d "${hostSandbox}"
+        certbot certonly --agree-tos --email "${email}" --webroot --webroot-path /var/www/html --expand -n -d "${hostTrusted}" -d "${hostSandbox}"
     fi
 
     # Install cron
-    echo "0 3 * * * \"${certbotPath}${certbotBin}\" certonly --apache -n -d \"${hostTrusted}\" -d \"${hostSandbox}\" -d \"${hostAPI}\"" > crontab
+    echo "0 3 * * * \"/usr/bin/certbot\" certonly --apache -n -d \"${hostTrusted}\" -d \"${hostSandbox}\" -d \"${hostAPI}\"" > crontab
     crontab crontab
     rm -rf crontab
 }

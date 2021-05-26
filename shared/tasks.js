@@ -4,37 +4,19 @@ const TaskType = {
     PYTHON: 'python',
 };
 
-if (Object.freeze) {
-    Object.freeze(TaskType)
-}
+const defaultSubtypeKey = '__default__';
 
 const PythonSubtypes = {
     ENERGY_PLUS: 'energy_plus',
-    NUMPY: 'numpy'
+    NUMPY: 'numpy',
+    PANDAS: 'pandas'
 };
 
-if (Object.freeze) {
-    Object.freeze(PythonSubtypes)
-}
+// File name of every build output
+const PYTHON_JOB_FILE_NAME = 'job.py';
 
 const subtypesByType = {
     [TaskType.PYTHON]: PythonSubtypes
-};
-
-const defaultPythonLibs = ['elasticsearch'];
-
-const taskSubtypeSpecs = {
-    [TaskType.PYTHON]: {
-        libs: defaultPythonLibs,
-        [PythonSubtypes.ENERGY_PLUS]: {
-            label: 'EnergyPlus task',
-            libs: [...defaultPythonLibs, 'eppy', 'requests']
-        },
-        [PythonSubtypes.NUMPY]: {
-            label: 'Numpy task',
-            libs: [...defaultPythonLibs, 'numpy', 'dtw']
-        }
-    }
 };
 
 const BuildState = {
@@ -46,19 +28,10 @@ const BuildState = {
     INITIALIZING: 5
 };
 
-if (Object.freeze) {
-    Object.freeze(BuildState)
-}
-
 const TaskSource = {
     USER: 'user',
-    BUILTIN: 'builtin',
-    BUILTIN_ADJACENT: 'builtin_adjacent'
+    BUILTIN: 'builtin'
 };
-
-if (Object.freeze) {
-    Object.freeze(BuildState)
-}
 
 function getFinalStates() {
     return [BuildState.FINISHED, BuildState.FAILED, BuildState.UNINITIALIZED];
@@ -72,27 +45,25 @@ function isTransitionState(state) {
     return getTransitionStates().includes(state);
 }
 
-function getSpecsForType(type, subtype = null) {
-    const spec = taskSubtypeSpecs[type];
-
-    if (!spec) {
-        return null;
-    }
-
-    if (subtype) {
-        return spec[subtype] ? spec[subtype] : null;
-    }
-
-    return spec;
-}
+const WizardType = {
+    BLANK: 'blank',
+    BASIC: 'basic',
+    ENERGY_PLUS: 'energy_plus',
+    MOVING_AVERAGE: 'moving_average',
+    AGGREGATION: 'aggregation',
+    MODEL_COMPARISON: 'model_comparison'
+};
 
 module.exports = {
     TaskType,
     subtypesByType,
-    taskSubtypeSpecs,
+    PythonSubtypes,
+    defaultSubtypeKey,
     BuildState,
     TaskSource,
     getFinalStates,
     getTransitionStates,
-    isTransitionState
+    isTransitionState,
+    PYTHON_JOB_FILE_NAME,
+    WizardType
 };

@@ -19,15 +19,10 @@ import {withTranslation} from "../lib/i18n";
 import {Tooltip} from "./Tooltip";
 import {Icon} from "../lib/bootstrap-components";
 import styles from "./CorrelationCharts.scss";
-import {brushHandlesLeftRight, isInExtent, transitionInterpolate, WheelDelta, ZoomEventSources} from "./common";
+import {brushHandlesLeftRight, ConfigDifference, isInExtent, transitionInterpolate, wheelDelta, ZoomEventSources, areZoomTransformsEqual, timeIntervalDifference} from "./common";
 import {PropType_d3Color_Required, PropType_NumberInRange} from "../lib/CustomPropTypes";
-
-const ConfigDifference = {
-    NONE: 0,
-    RENDER: 1,
-    DATA: 2,
-    DATA_WITH_CLEAR: 3
-};
+import StatusMsg from "./StatusMsg";
+import commonStyles from "./commons.scss";
 
 function compareConfigs(conf1, conf2) {
     let diffResult = ConfigDifference.NONE;
@@ -49,7 +44,8 @@ class TooltipContent extends Component {
     static propTypes = {
         config: PropTypes.object.isRequired,
         signalSetsData: PropTypes.object,
-        selection: PropTypes.object
+        selection: PropTypes.object,
+        tooltipFormat: PropTypes.func.isRequired
     };
 
     render() {
@@ -63,7 +59,7 @@ class TooltipContent extends Component {
             return (
                 <div>
                     <div>Range: <Icon icon="chevron-left"/>{keyF(bucket.key)} <Icon icon="ellipsis-h"/> {keyF(bucket.key + step)}<Icon icon="chevron-right"/></div>
-                    <div>Count: {bucket.count}</div>
+                    <div>{this.props.tooltipFormat(bucket)}</div>
                     <div>Frequency: {probF(bucket.prob * 100)}%</div>
                 </div>
             );
@@ -78,7 +74,7 @@ class TooltipContent extends Component {
     withTranslation,
     withErrorHandling,
     intervalAccessMixin()
-], ["getView", "setView"])
+], ["getView", "setView"], ["processBucket", "prepareData"])
 export class HistogramChart extends Component {
     constructor(props){
         super(props);
@@ -102,6 +98,8 @@ export class HistogramChart extends Component {
         this.resizeListener = () => {
             this.createChart(true);
         };
+
+        this.plotRectId = _.uniqueId("plotRect");
     }
 
     static propTypes = {
@@ -109,7 +107,9 @@ export class HistogramChart extends Component {
             sigSetCid: PropTypes.string.isRequired,
             sigCid: PropTypes.string.isRequired,
             color: PropType_d3Color_Required(),
-            tsSigCid: PropTypes.string
+            tsSigCid: PropTypes.string,
+            metric_sigCid: PropTypes.string,
+            metric_type: PropTypes.oneOf(["sum", "min", "max", "avg"])
         }).isRequired,
         height: PropTypes.number.isRequired,
         margin: PropTypes.object,
@@ -121,6 +121,7 @@ export class HistogramChart extends Component {
         withOverview: PropTypes.bool,
         withTransition: PropTypes.bool,
         withZoom: PropTypes.bool,
+        tooltipFormat: PropTypes.func, // bucket => line in tooltip
 
         xAxisTicksCount: PropTypes.number,
         xAxisTicksFormat: PropTypes.func,
@@ -138,7 +139,11 @@ export class HistogramChart extends Component {
         zoomLevelMax: PropTypes.number,
 
         className: PropTypes.string,
-        style: PropTypes.object
+        style: PropTypes.object,
+
+        filter: PropTypes.object,
+        processBucket: PropTypes.func, // see HistogramChart.processBucket for reference
+        prepareData: PropTypes.func, // see HistogramChart.prepareData for reference
     };
 
     static defaultProps = {
@@ -154,6 +159,7 @@ export class HistogramChart extends Component {
         withOverview: true,
         withTransition: true,
         withZoom: true,
+        tooltipFormat: bucket => `Count: ${bucket.count}`,
 
         zoomLevelMin: 1,
         zoomLevelMax: 4,
@@ -175,16 +181,8 @@ export class HistogramChart extends Component {
 
         // test if time interval changed
         const considerTs = !!this.props.config.tsSigCid;
-        if (considerTs) {
-            const prevAbs = this.getIntervalAbsolute(prevProps);
-            const prevSpec = this.getIntervalSpec(prevProps);
-
-            if (prevSpec !== this.getIntervalSpec()) {
-                configDiff = Math.max(configDiff, ConfigDifference.DATA_WITH_CLEAR);
-            } else if (prevAbs !== this.getIntervalAbsolute()) { // If its just a regular refresh, don't clear the chart
-                configDiff = Math.max(configDiff, ConfigDifference.DATA);
-            }
-        }
+        if (considerTs)
+            configDiff = Math.max(configDiff, timeIntervalDifference(this, prevProps));
 
         // test if limits changed
         if (!Object.is(prevProps.xMinValue, this.props.xMinValue) || !Object.is(prevProps.xMaxValue, this.props.xMaxValue))
@@ -212,7 +210,7 @@ export class HistogramChart extends Component {
                 || prevState.signalSetData !== this.state.signalSetData
                 || configDiff !== ConfigDifference.NONE;
 
-            const updateZoom = !Object.is(prevState.zoomTransform, this.state.zoomTransform);
+            const updateZoom = !areZoomTransformsEqual(prevState.zoomTransform, this.state.zoomTransform);
 
             this.createChart(forceRefresh, updateZoom);
             this.prevContainerNode = this.containerNode;
@@ -225,7 +223,7 @@ export class HistogramChart extends Component {
         window.removeEventListener('resize', this.resizeListener);
     }
 
-    /** Fetches new data for the chart, processes the results using this.processData method and updates the state accordingly, so the chart is redrawn */
+    /** Fetches new data for the chart, processes the results using prepareData method and updates the state accordingly, so the chart is redrawn */
     @withAsyncErrorHandler
     async fetchData() {
         const config = this.props.config;
@@ -260,24 +258,31 @@ export class HistogramChart extends Component {
                         sigCid: config.sigCid,
                         lte: this.props.xMaxValue
                     });
+                if (this.props.filter)
+                    filter.children.push(this.props.filter);
 
                 // filter by current zoom
-                if (!Object.is(this.state.zoomTransform, d3Zoom.zoomIdentity)) {
+                if (!areZoomTransformsEqual(this.state.zoomTransform, d3Zoom.zoomIdentity)) {
                     const scale = this.state.zoomTransform.k;
-                    if (minStep !== undefined)
-                        minStep = Math.floor(minStep / scale);
                     maxBucketCount = Math.ceil(maxBucketCount * scale);
                     isZoomedIn = true;
                 }
 
-                const results = await this.dataAccessSession.getLatestHistogram(config.sigSetCid, [config.sigCid], maxBucketCount, minStep, filter);
+                let metrics;
+                if (this.props.config.metric_sigCid && this.props.config.metric_type) {
+                    metrics = {};
+                    metrics[this.props.config.metric_sigCid] = [this.props.config.metric_type];
+                }
+
+                const results = await this.dataAccessSession.getLatestHistogram(config.sigSetCid, [config.sigCid], maxBucketCount, minStep, filter, metrics);
 
                 if (results) { // Results is null if the results returned are not the latest ones
-                    const processedResults = this.processData(results);
+                    const prepareData = this.props.prepareData || HistogramChart.prepareData;
+                    const processedResults = prepareData(this, results);
                     if (processedResults.buckets.length === 0) {
                         this.setState({
                             signalSetData: null,
-                            statusMsg: "No data."
+                            statusMsg: this.props.t("No data.")
                         });
                         this.brush = null;
                         this.zoom = null;
@@ -312,12 +317,43 @@ export class HistogramChart extends Component {
                     });
                 }
             } catch (err) {
+                this.setState({statusMsg: this.props.t("Error loading data.")});
                 throw err;
             }
         }
     }
 
-    processData(data) {
+    /**
+     * The value returned from this function is used to determine the height of the bar corresponding to the bucket.
+     *
+     * @param {HistogramChart} self - this HistogramChart object
+     * @param {object} bucket - the record from server; contains 'count' field, and also 'values' field if metrics were specified
+     */
+    static processBucket(self, bucket) {
+        const config = self.props.config;
+        if (config.metric_sigCid && config.metric_type) {
+            bucket.metric = bucket.values[config.metric_sigCid][config.metric_type];
+            delete bucket.values;
+            return bucket.metric;
+        }
+        else
+            return bucket.count;
+    }
+
+    /**
+     * Processes the data returned from the server and returns new signalSetData object.
+     *
+     * @param {HistogramChart} self - this HistogramChart object
+     * @param {object} data - the data from server; contains at least 'buckets', 'step' and 'offset' fields
+     *
+     * @returns {object} - signalSetData to be saved to state; must contain:
+     *
+     *   - 'buckets' - array of objects with 'key' (left boundary of the bucket) and 'prob' (frequency; height of the bucket)
+     *   - 'step' - width of the bucket
+     *   - 'min' and 'max' (along the x-axis)
+     *   - 'maxProb' - frequency (probability) of the highest bar
+     */
+    static prepareData(self, data) {
         if (data.buckets.length === 0)
             return {
                 buckets: data.buckets,
@@ -331,18 +367,22 @@ export class HistogramChart extends Component {
         const min = data.buckets[0].key;
         const max = data.buckets[data.buckets.length - 1].key + data.step;
 
-        let maxCount = 0;
-        let totalCount = 0;
+        const processBucket = self.props.processBucket || HistogramChart.processBucket;
+        for (const bucket of data.buckets)
+            bucket.value = processBucket(self, bucket);
+
+        let maxValue = 0;
+        let totalValue = 0;
         for (const bucket of data.buckets) {
-            if (bucket.count > maxCount)
-                maxCount = bucket.count;
-            totalCount += bucket.count;
+            if (bucket.value > maxValue)
+                maxValue = bucket.value;
+            totalValue += bucket.value;
         }
 
         for (const bucket of data.buckets) {
-            bucket.prob = bucket.count / totalCount;
+            bucket.prob = bucket.value / totalValue;
         }
-        const maxProb = maxCount / totalCount;
+        const maxProb = maxValue / totalValue;
 
         return {
             buckets: data.buckets,
@@ -426,14 +466,10 @@ export class HistogramChart extends Component {
 
         this.drawBars(signalSetData, this.barsSelection, xScale, yScale, d3Color.color(this.props.config.color), false);
 
-        // we don't want to change zoom object and cursor area when updating only zoom (it breaks touch drag)
-        if (forceRefresh || widthChanged) {
-            this.createChartCursorArea();
-            if (this.props.withZoom)
-                this.createChartZoom(xSize, ySize);
-        }
+        if ((forceRefresh || widthChanged) && this.props.withZoom) // no need to update this.zoom object when only updating current zoom (zoomTransform)
+            this.createChartZoom(xSize, ySize);
 
-        this.createChartCursor(signalSetData, xScale, yScale, ySize);
+        this.createChartCursor(signalSetData, xScale, yScale);
 
         if (this.props.withOverview)
             this.createChartOverview(globalSignalSetData);
@@ -441,7 +477,7 @@ export class HistogramChart extends Component {
 
     // noinspection JSCommentMatchesSignature
     /**
-     * @param data                  data in format as produces by this.processData
+     * @param data                  data in format as produces by this.prepareData
      * @param selection             d3 selection to which the data will get assigned and drawn
      * @param disableTransitions    animations when bars are created or modified
      */
@@ -469,24 +505,6 @@ export class HistogramChart extends Component {
 
         bars.exit()
             .remove();
-    }
-
-    /** Prepares rectangle for cursor movement events.
-     *  Called from this.createChart(). */
-    createChartCursorArea() {
-        this.cursorAreaSelection
-            .selectAll('rect')
-            .remove();
-
-        this.cursorAreaSelection
-            .append('rect')
-            .attr('pointer-events', 'all')
-            .attr('cursor', 'crosshair')
-            .attr('x', 0)
-            .attr('y', 0)
-            .attr('width', this.renderedWidth - this.props.margin.left - this.props.margin.right)
-            .attr('height', this.props.height - this.props.margin.top - this.props.margin.bottom)
-            .attr('visibility', 'hidden');
     }
 
     /** Handles mouse movement to select the closest bar (for displaying its details in Tooltip, etc.).
@@ -616,7 +634,12 @@ export class HistogramChart extends Component {
             .on("zoom", handleZoom)
             .on("end", handleZoomEnd)
             .on("start", handleZoomStart)
-            .wheelDelta(WheelDelta(2));
+            .wheelDelta(wheelDelta(2))
+            .filter(() => {
+                if (d3Event.type === "wheel" && !d3Event.shiftKey)
+                    return false;
+                return !d3Event.ctrlKey && !d3Event.button;
+            });
         this.svgContainerSelection.call(this.zoom);
         this.moveBrush(this.state.zoomTransform);
     }
@@ -764,24 +787,24 @@ export class HistogramChart extends Component {
             return (
                 <svg ref={node => this.containerNode = node} height={this.props.height} width="100%"
                      className={this.props.className} style={this.props.style} >
-                    <text textAnchor="middle" x="50%" y="50%" fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px">
+
+                    <StatusMsg>
                         {this.state.statusMsg}
-                    </text>
+                    </StatusMsg>
                 </svg>
             );
 
         } else {
-
             return (
                 <div className={this.props.className} style={this.props.style} >
                     <div ref={node => this.svgContainerSelection = select(node)} className={styles.touchActionPanY}>
                     <svg id="cnt" ref={node => this.containerNode = node} height={this.props.height} width="100%">
                         <defs>
-                            <clipPath id="plotRect">
+                            <clipPath id={this.plotRectId}>
                                 <rect x="0" y="0" width={this.state.width - this.props.margin.left - this.props.margin.right} height={this.props.height - this.props.margin.top - this.props.margin.bottom} />
                             </clipPath>
                         </defs>
-                        <g transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`} clipPath="url(#plotRect)" >
+                        <g transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`} clipPath={`url(#${this.plotRectId})`} >
                             <g ref={node => this.barsSelection = select(node)}/>
                             <g ref={node => this.barsHighlightSelection = select(node)}/>
                         </g>
@@ -793,10 +816,10 @@ export class HistogramChart extends Component {
                         <g ref={node => this.yAxisSelection = select(node)} transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>
 
                         {!this.state.zoomInProgress &&
-                        <line ref={node => this.cursorSelection = select(node)} strokeWidth="1" stroke="rgb(50,50,50)" visibility="hidden"/>}
-                        <text textAnchor="middle" x="50%" y="50%" fontFamily="'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif" fontSize="14px">
+                        <line ref={node => this.cursorSelection = select(node)} className={commonStyles.cursorLine} visibility="hidden"/>}
+                        <StatusMsg>
                             {this.state.statusMsg}
-                        </text>
+                        </StatusMsg>
                         {this.props.withTooltip && !this.state.zoomInProgress &&
                         <Tooltip
                             config={this.props.config}
@@ -805,10 +828,16 @@ export class HistogramChart extends Component {
                             containerWidth={this.state.width}
                             mousePosition={this.state.mousePosition}
                             selection={this.state.selection}
-                            contentRender={props => <TooltipContent {...props}/>}
+                            contentRender={props => <TooltipContent {...props} tooltipFormat={this.props.tooltipFormat} />}
                         />
                         }
-                        <g ref={node => this.cursorAreaSelection = select(node)} transform={`translate(${this.props.margin.left}, ${this.props.margin.top})`}/>
+                        {/* cursor area */}
+                        <rect ref={node => this.cursorAreaSelection = select(node)}
+                              x={this.props.margin.left} y={this.props.margin.top}
+                              width={this.state.width - this.props.margin.left - this.props.margin.right}
+                              height={this.props.height - this.props.margin.top - this.props.margin.bottom}
+                              pointerEvents={"all"} cursor={"crosshair"} visibility={"hidden"}
+                        />
                     </svg>
                     </div>
                     {this.props.withOverview &&

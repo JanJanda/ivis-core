@@ -7,8 +7,9 @@ import {
     Button,
     CheckBox,
     ColorPicker,
+    Dropdown,
     Fieldset,
-    InputField,
+    InputField, StaticField,
     TableSelect,
     TextArea
 } from "../lib/form";
@@ -47,6 +48,14 @@ export default class ParamTypes {
                 return spec['default'];
             } else {
                 return value;
+            }
+        };
+
+        const ensureOption = (options, value) => {
+            if (options.map(opt => opt.key).includes(value)) {
+                return value;
+            } else {
+                return options[0].key;
             }
         };
 
@@ -90,6 +99,20 @@ export default class ParamTypes {
             setFields: setStringFieldFromParam,
             getParams: getParamsFromField,
             validate: (prefix, spec, state) => {
+                if (mode === "json") {
+                    const formId = this.getParamFormId(prefix, spec.id);
+                    const val = state.getIn([formId, 'value']);
+                    if (val === '')
+                        return;
+
+                    try {
+                        JSON.parse(val);
+                    } catch (e) {
+                        if (e instanceof SyntaxError) {
+                            state.setIn([formId, 'error'], t('Please enter a valid JSON.') + " (" + e.message + ")");
+                        } else throw e;
+                    }
+                }
             },
             render: (self, prefix, spec) => <ACEEditor key={spec.id} id={this.getParamFormId(prefix, spec.id)}
                                                        label={spec.label} help={spec.help} mode={mode}
@@ -122,6 +145,12 @@ export default class ParamTypes {
             setFields: setStringFieldFromParam,
             getParams: getParamsFromField,
             validate: (prefix, spec, state) => {
+                const formId = this.getParamFormId(prefix, spec.id);
+                const val = state.getIn([formId, 'value']);
+
+                if ((spec.isRequired && val.trim() === '')) {
+                    state.setIn([formId, 'error'], t('Input is required'));
+                }
             },
             render: (self, prefix, spec) => <InputField key={spec.id} id={this.getParamFormId(prefix, spec.id)}
                                                         label={spec.label} help={spec.help}/>,
@@ -129,7 +158,25 @@ export default class ParamTypes {
         };
 
 
-        this.paramTypes.number = {
+        this.paramTypes.integer = {
+            adopt: adoptString,
+            setFields: setStringFieldFromParam,
+            getParams: getParamsFromField,
+            validate: (prefix, spec, state) => {
+                const formId = this.getParamFormId(prefix, spec.id);
+                const val = state.getIn([formId, 'value']);
+
+                if ((spec.isRequired && val.trim() === '') || !Number.isInteger(Number(val))) {
+                    state.setIn([formId, 'error'], t('Please enter an integer'));
+                }
+            },
+            render: (self, prefix, spec) => <InputField key={spec.id} id={this.getParamFormId(prefix, spec.id)}
+                                                        label={spec.label} help={spec.help}/>,
+            upcast: (spec, value) => Number.parseInt(value)
+        };
+        this.paramTypes.number = this.paramTypes.integer; // for backwards compatibility
+
+        this.paramTypes.float = {
             adopt: adoptString,
             setFields: setStringFieldFromParam,
             getParams: getParamsFromField,
@@ -143,7 +190,7 @@ export default class ParamTypes {
             },
             render: (self, prefix, spec) => <InputField key={spec.id} id={this.getParamFormId(prefix, spec.id)}
                                                         label={spec.label} help={spec.help}/>,
-            upcast: (spec, value) => Number.parseInt(value)
+            upcast: (spec, value) => Number.parseFloat(value)
         };
 
 
@@ -164,6 +211,25 @@ export default class ParamTypes {
 
         this.paramTypes.json = getACEEditor('json');
 
+        this.paramTypes.option = {
+            adopt: (prefix, spec, state) => {
+                const formId = this.getParamFormId(prefix, spec.id);
+                state.setIn([formId, 'value'], ensureOption(spec.options, state.getIn([formId, 'value'])));
+            },
+            setFields: (prefix, spec, param, data) => data[this.getParamFormId(prefix, spec.id)] = ensureOption(spec.options, param),
+            getParams: getParamsFromField,
+            validate: (prefix, spec, state) => {
+                const formId = this.getParamFormId(prefix, spec.id);
+                const sel = state.getIn([formId, 'value']);
+
+                if (!(spec.options.map(opt => opt.key).includes(sel))) {
+                    state.setIn([formId, 'error'], t('Option is not allowed.'));
+                }
+            },
+            render: (self, prefix, spec) => <Dropdown key={spec.id} id={this.getParamFormId(prefix, spec.id)}
+                                                      label={spec.label} help={spec.help} options={spec.options}/>,
+            upcast: (spec, value) => ensureOption(spec.options, value)
+        };
 
         this.paramTypes.color = {
             adopt: (prefix, spec, state) => {
@@ -205,8 +271,8 @@ export default class ParamTypes {
                     {data: 1, title: t('Id')},
                     {data: 2, title: t('Name')},
                     {data: 3, title: t('Description')},
-                    {data: 5, title: t('Created'), render: data => moment(data).fromNow()},
-                    {data: 7, title: t('Namespace')}
+                    {data: 6, title: t('Created'), render: data => moment(data).fromNow()},
+                    {data: 8, title: t('Namespace')}
                 ];
 
                 return <TableSelect
@@ -281,7 +347,13 @@ export default class ParamTypes {
                     {data: 6, title: t('Namespace')}
                 ];
 
-                let dataUrl, data;
+                let filterByType;
+                if (spec.signalType) {
+                    const types = Array.isArray(spec.signalType) ? spec.signalType.join(" ") : spec.signalType;
+                    filterByType = [null, null, null, types, null, null]; // this should have the same length as signalColumns
+                }
+
+                console.log('rendering')
                 if (signalSetCid) {
                     return <TableSelect
                         key={spec.id}
@@ -294,16 +366,16 @@ export default class ParamTypes {
                         selectMode={card.max === 1 ? TableSelectMode.SINGLE : TableSelectMode.MULTI}
                         selectionLabelIndex={2}
                         selectionKeyIndex={1}
-                        data={data}
                         dataUrl={`rest/signals-table-by-cid/${signalSetCid}`}
+                        searchCols={filterByType}
                     />;
                 } else {
-                    return <AlignedRow key={spec.id}>
-                        <div>{t('Select signal set to see the list of signals.')}</div>
-                    </AlignedRow>
+                    return (
+                        <StaticField key={spec.id} id={spec.id} label={spec.label}>
+                            {t('Select signal set to see the list of signals.')}
+                        </StaticField>
+                    );
                 }
-
-
             },
             upcast: (spec, value) => {
                 const card = parseCardinality(spec.cardinality);

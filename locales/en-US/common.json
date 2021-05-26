@@ -960,5 +960,22 @@
   "thePasswordMustContainAtLeastOne-1": "The password must contain at least one uppercase letter",
   "thePasswordMustContainAtLeastOneNumber": "The password must contain at least one number",
   "thePasswordMustContainAtLeastOneSpecial": "The password must contain at least one special character",
-  "useHandlebars": "Use Handlebars syntax. You can refer to data using their id. Example: \"{{toISOString ts}}\""
+  "useHandlebars": "Use Handlebars syntax. You can refer to data using their id. Example: \"{{toISOString ts}}\"",
+  "dTsEmptyTable": "No data available in table",
+  "dTsInfo": "Showing _START_ to _END_ of _TOTAL_ entries",
+  "dTsInfoEmpty": "Showing 0 to 0 of 0 entries",
+  "dTsInfoFiltered": "(filtered from _MAX_ total entries)",
+  "dTsInfoPostFix": "",
+  "dTsInfoThousands": ",",
+  "dTsLengthMenu": "Show _MENU_ entries",
+  "dTsLoadingRecords": "Loading...",
+  "dTsProcessing": "Processing...",
+  "dTsSearch": "Search:",
+  "dTsZeroRecords": "No matching records found",
+  "dTsFirst": "First",
+  "dTsLast": "Last",
+  "dTsNext": "Next",
+  "dTsPrevious": "Previous",
+  "dTsSortAscending": ": activate to sort column ascending",
+  "dTsSortDescending": ": activate to sort column descending"
 }

@@ -39,11 +39,32 @@ async function ajaxListTx(tx, params, queryFun, columns, options) {
 
     } else {
         const whereFun = function() {
-            let searchVal = '%' + params.search.value.replace(/\\/g, '\\\\').replace(/([%_])/g, '\\$1') + '%';
+            // search in all columns - all words must be included, each in any column
+            const searchWords = params.search.value.split(" ");
+            for (const word of searchWords) {
+                if (word === "") continue;
+                const whereWord = function() {
+                    let searchVal = '%' + word.replace(/\\/g, '\\\\').replace(/([%_])/g, '\\$1') + '%';
+                    for (let colIdx = 0; colIdx < params.columns.length; colIdx++) {
+                        const col = params.columns[colIdx];
+                        if (col.searchable) {
+                            this.orWhere(columnsNames[parseInt(col.data)], 'like', searchVal);
+                        }
+                    }
+                }
+                this.andWhere(whereWord);
+            }
+            // column-specific search - one of the words must be included in the specified column
             for (let colIdx = 0; colIdx < params.columns.length; colIdx++) {
                 const col = params.columns[colIdx];
-                if (col.searchable) {
-                    this.orWhere(columnsNames[parseInt(col.data)], 'like', searchVal);
+                if (col.search && col.search.value && col.search.value !== "") {
+                    const whereColumn = function() {
+                        for (const word of col.search.value.split(" ")) {
+                            let searchVal = '%' + word.replace(/\\/g, '\\\\').replace(/([%_])/g, '\\$1') + '%';
+                            this.orWhere(columnsNames[parseInt(col.data)], 'like', searchVal);
+                        }
+                    }
+                    this.andWhere(whereColumn);
                 }
             }
         }

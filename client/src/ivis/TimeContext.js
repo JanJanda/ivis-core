@@ -234,3 +234,9 @@ export function intervalAccessMixin(mappings = defaultMappings) {
         }
     });
 }
+
+export function withIntervalAccess(mappings = defaultMappings) {
+    return withComponentMixins([
+        intervalAccessMixin(mappings)
+    ])
+}

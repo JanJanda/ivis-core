@@ -8,7 +8,8 @@ const uploadedFilesDir = path.join(files.filesDir, 'uploaded');
 const {castToInteger} = require('./helpers');
 
 const multer = require('multer')({
-    dest: uploadedFilesDir
+    dest: uploadedFilesDir,
+    preservePath: true
 });
 
 function installUploadHandler(router, url, replacementBehavior, type, subType, transformResponseFn) {

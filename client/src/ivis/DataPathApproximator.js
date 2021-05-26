@@ -9,7 +9,7 @@ const pathTracingSegmentLength = 10;
 
 export class DataPathApproximator {
     constructor(pathNode, xScale, yScale, chartWidth) {
-        const dataPoints = pathNode.__data__.map(p => ({x: xScale(p.ts), y: yScale(p.avg)}));
+        const dataPoints = pathNode.__data__.filter(p => p !== null).map(p => ({x: xScale(p.ts), y: yScale(p.avg)}));
 
         if (dataPoints.length > chartWidth / pathTracingThreshold) {
             this.points = dataPoints;

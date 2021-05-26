@@ -53,13 +53,17 @@ class Table extends Component {
         onSelectionDataAsync: PropTypes.func,
         withHeader: PropTypes.bool,
         refreshInterval: PropTypes.number,
-        pageLength: PropTypes.number
+        pageLength: PropTypes.number,
+        order: PropTypes.array,
+        search: PropTypes.string, // initial value of the search field
+        searchCols: PropTypes.arrayOf(PropTypes.string), // should have same length as `columns`, set items to `null` to prevent search
     }
 
     static defaultProps = {
         selectMode: TableSelectMode.NONE,
         selectionKeyIndex: 0,
-        pageLength: 50
+        pageLength: 50,
+        order: [[0, 'asc']]
     }
 
     refresh() {
@@ -254,6 +258,7 @@ class Table extends Component {
 
                 column.type = 'html';
                 column.createdCell = createdCellFn;
+                column.render = () => '';
 
                 if (!('data' in column)) {
                     column.data = null;
@@ -277,6 +282,7 @@ class Table extends Component {
 
         const dtOptions = {
             columns,
+            order: [...this.props.order],
             autoWidth: false,
             pageLength: this.props.pageLength,
             dom: // This overrides Bootstrap 4 settings. It may need to be updated if there are updates in the DataTables Bootstrap 4 plugin.
@@ -284,6 +290,13 @@ class Table extends Component {
                 "<'row'<'col-sm-12'<'" + styles.dataTableTable + "'tr>>>" +
                 "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>"
         };
+        if (this.props.search)
+            dtOptions.search = { search: this.props.search };
+        if (this.props.searchCols) {
+            dtOptions.searchCols = this.props.searchCols.map(value => value !== null ? ({
+                search: value,
+            }) : null)
+        }
 
         const self = this;
         dtOptions.createdRow = function(row, data) {
@@ -316,6 +329,31 @@ class Table extends Component {
                 }
             });
         };
+
+        const t = this.props.t;
+        dtOptions.language = {
+          "sEmptyTable":     t("dTsEmptyTable"),
+          "sInfo":           t("dTsInfo"),
+          "sInfoEmpty":      t("dTsInfoEmpty"),
+          "sInfoFiltered":   t("dTsInfoFiltered"),
+          "sInfoPostFix":    t("dTsInfoPostFix"),
+          "sInfoThousands":  t("dTsInfoThousands"),
+          "sLengthMenu":     t("dTsLengthMenu"),
+          "sLoadingRecords": t("dTsLoadingRecords"),
+          "sProcessing":     t("dTsProcessing"),
+          "sSearch":         t("dTsSearch"),
+          "sZeroRecords":    t("dTsZeroRecords"),
+          "oPaginate": {
+            "sFirst":    t("dTsFirst"),
+            "sLast":     t("dTsLast"),
+            "sNext":     t("dTsNext"),
+            "sPrevious": t("dTsPrevious")
+          },
+          "oAria": {
+           "sSortAscending":  t("dTsSortAscending"),
+           "sSortDescending": t("dTsSortDescending")
+          }
+       }
 
         dtOptions.initComplete = function() {
             self.jqSelectInfo = jQuery('<div class="dataTable_selection_info"/>');

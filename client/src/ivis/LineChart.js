@@ -1,7 +1,7 @@
 'use strict';
 
 import React, {Component} from "react";
-import {createBase, isSignalVisible, RenderStatus, TimeBasedChartBase} from "./TimeBasedChartBase";
+import {createBase, isSignalVisible, RenderStatus, TimeBasedChartBase, XAxisType} from "./TimeBasedChartBase";
 import {getAxisIdx, LineChartBase, pointsOnNoAggregation} from "./LineChartBase";
 import {select} from "d3-selection";
 import * as d3Shape from "d3-shape";
@@ -12,6 +12,7 @@ import {Icon} from "../lib/bootstrap-components";
 import {format as d3Format} from "d3-format";
 import {withComponentMixins} from "../lib/decorator-helpers";
 import {withTranslation} from "../lib/i18n";
+import {PropType_d3Color} from "../lib/CustomPropTypes";
 
 function getSignalValuesForDefaultTooltip(tooltipContent, sigSetConf, sigConf, sigSetCid, sigCid, signalData, isAgg) {
     const isAvg = signalData.avg !== null;
@@ -72,14 +73,19 @@ export class LineChart extends Component {
         config: PropTypes.object.isRequired,
         contentComponent: PropTypes.func,
         contentRender: PropTypes.func,
-        onClick: PropTypes.func,
+        onClick: PropTypes.func, // FIXME: should this be passed to the LineChartBase?
         height: PropTypes.number,
         margin: PropTypes.object,
         withTooltip: PropTypes.bool,
         withBrush: PropTypes.bool,
+        withZoom: PropTypes.bool,
+        zoomUpdateReloadInterval: PropTypes.number, // milliseconds after the zoom ends; set to null to disable updates
+        loadingOverlayColor: PropType_d3Color(),
+        displayLoadingTextWhenUpdating: PropTypes.bool,
         tooltipContentComponent: PropTypes.func,
         tooltipContentRender: PropTypes.func,
         tooltipExtraProps: PropTypes.object,
+        getSignalValuesForDefaultTooltip: PropTypes.func,
 
         getExtraQueries: PropTypes.func,
         prepareExtraData: PropTypes.func,
@@ -89,6 +95,10 @@ export class LineChart extends Component {
         compareConfigs: PropTypes.func,
         lineVisibility: PropTypes.func,
         lineCurve: PropTypes.func,
+        lineWidth: PropTypes.number,
+        discontinuityInterval: PropTypes.number, // if two data points are further apart than this interval (in seconds), the lines are split into segments
+        minimumIntervalMs: PropTypes.number,
+        xAxisType: PropTypes.oneOf([XAxisType.DATETIME, XAxisType.NUMBER]), // data type on the x-axis, TODO
 
         controlTimeIntervalChartWidth: PropTypes.bool
     }
@@ -98,9 +108,11 @@ export class LineChart extends Component {
         height: 500,
         withTooltip: true,
         withBrush: true,
+        withZoom: true,
         lineVisibility: pointsOnNoAggregation,
         controlTimeIntervalChartWidth: true,
-        lineCurve: d3Shape.curveLinear
+        lineCurve: d3Shape.curveLinear,
+        getSignalValuesForDefaultTooltip: getSignalValuesForDefaultTooltip,
     }
 
     createChart(base, signalSetsData, baseState, abs, xScale, yScales, points, lineVisibility) {
@@ -112,7 +124,7 @@ export class LineChart extends Component {
                         const sigCid = sigConf.cid;
                         const yScale = yScales[getAxisIdx(sigConf)];
                         const minMaxArea = d3Shape.area()
-                            .defined(d => d.data[sigCid].min !== null && d.data[sigCid].max)
+                            .defined(d => d !== null && d.data[sigCid].min !== null && d.data[sigCid].max)
                             .x(d => xScale(d.ts))
                             .y0(d => yScale(d.data[sigCid].min))
                             .y1(d => yScale(d.data[sigCid].max))
@@ -178,7 +190,7 @@ export class LineChart extends Component {
                 margin={props.margin}
                 signalAggs={['min', 'max', 'avg']}
                 lineAgg="avg"
-                getSignalValuesForDefaultTooltip={getSignalValuesForDefaultTooltip}
+                getSignalValuesForDefaultTooltip={this.props.getSignalValuesForDefaultTooltip}
                 prepareData={this.boundPrepareData}
                 getExtraQueries={this.props.getExtraQueries}
                 getGraphContent={this.boundGetGraphContent}
@@ -188,14 +200,22 @@ export class LineChart extends Component {
                 getSignalGraphContent={(base, sigSetCid, sigCid) => <path ref={node => this.areaPathSelection[sigSetCid][sigCid] = select(node)}/>}
                 withTooltip={props.withTooltip}
                 withBrush={props.withBrush}
+                withZoom={props.withZoom}
+                zoomUpdateReloadInterval={props.zoomUpdateReloadInterval}
                 contentComponent={props.contentComponent}
                 contentRender={props.contentRender}
                 tooltipContentComponent={this.props.tooltipContentComponent}
                 tooltipContentRender={this.props.tooltipContentRender}
                 tooltipExtraProps={this.props.tooltipExtraProps}
                 lineVisibility={this.props.lineVisibility}
+                lineWidth={this.props.lineWidth}
                 controlTimeIntervalChartWidth={this.props.controlTimeIntervalChartWidth}
                 lineCurve={this.props.lineCurve}
+                discontinuityInterval={this.props.discontinuityInterval}
+                loadingOverlayColor={this.props.loadingOverlayColor}
+                displayLoadingTextWhenUpdating={this.props.displayLoadingTextWhenUpdating}
+                minimumIntervalMs={this.props.minimumIntervalMs}
+                xAxisType={this.props.xAxisType}
             />
         );
     }

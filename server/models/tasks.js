@@ -13,6 +13,7 @@ const fs = require('fs-extra-promise');
 const taskHandler = require('../lib/task-handler');
 const files = require('./files');
 const dependencyHelpers = require('../lib/dependency-helpers');
+const {getWizard } = require("../lib/wizards");
 
 const allowedKeysCreate = new Set(['name', 'description', 'type', 'settings', 'namespace']);
 const allowedKeysUpdate = new Set(['name', 'description', 'settings', 'namespace']);
@@ -70,6 +71,18 @@ async function create(context, task) {
             enforce(Object.values(subtypesByType[task.type]).includes(task.settings.subtype), `Unknown ${task.type} type's subtype`);
         }
 
+        const wizard = getWizard(task.type, task.settings.subtype, task.wizard);
+        if (wizard != null) {
+            wizard(task);
+        } else {
+            // We might throw error here instead, might be confusing from UX perspective
+            task.settings = {
+                ...(task.settings || {}),
+                params: [],
+                code: ''
+            };
+        }
+
         const filteredEntity = filterObject(task, allowedKeysCreate);
         filteredEntity.settings = JSON.stringify(filteredEntity.settings);
         filteredEntity.build_state = BuildState.SCHEDULED;
@@ -83,7 +96,7 @@ async function create(context, task) {
         return id;
     });
 
-    scheduleCreate(id, task.settings);
+    scheduleInit(id, task.settings);
 
     return id;
 }
@@ -137,7 +150,7 @@ async function updateWithConsistencyCheck(context, task) {
         await shares.rebuildPermissionsTx(tx, {entityTypeId: 'task', entityId: task.id});
     });
 
-    scheduleBuildOrCreate(uninitialized, task.id, task.settings)
+    scheduleBuildOrInit(uninitialized, task.id, task.settings)
 }
 
 /**
@@ -189,9 +202,9 @@ async function getParamsById(context, id) {
  * @param id the primary key of the task
  * @param settings
  */
-function scheduleBuildOrCreate(uninitialized, id, settings) {
+function scheduleBuildOrInit(uninitialized, id, settings) {
     if (uninitialized) {
-        scheduleCreate(id, settings);
+        scheduleInit(id, settings);
     } else {
         scheduleBuild(id, settings);
     }
@@ -201,7 +214,7 @@ function scheduleBuild(id, settings) {
     taskHandler.scheduleBuild(id, settings.code, taskHandler.getTaskBuildOutputDir(id));
 }
 
-function scheduleCreate(id, settings) {
+function scheduleInit(id, settings) {
     taskHandler.scheduleInit(id, settings.code, taskHandler.getTaskBuildOutputDir(id));
 }
 
@@ -228,7 +241,7 @@ async function compile(context, id) {
     });
 
     const settings = JSON.parse(task.settings);
-    scheduleBuildOrCreate(uninitialized, id, settings);
+    scheduleBuildOrInit(uninitialized, id, settings);
 }
 
 async function compileAll() {
@@ -238,7 +251,7 @@ async function compileAll() {
         const settings = JSON.parse(task.settings);
         const uninitialized = (task.build_state === BuildState.UNINITIALIZED);
         await knex('tasks').update({build_state: BuildState.SCHEDULED}).where('id', task.id);
-        scheduleBuildOrCreate(uninitialized, task.id, settings);
+        scheduleBuildOrInit(uninitialized, task.id, settings);
     }
 }
 
