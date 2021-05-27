@@ -30,8 +30,8 @@ async function insertCovid() {
 
 async function insertWeather() {
     try {
-        const fetchedPrague = await fetch('http://api.openweathermap.org/data/2.5/find?units=metric&q=Prague,cz&appid=3f9ed61a70b43a7d7f2913f40ff2d4eb');
-        const fetchedVimperk = await fetch('http://api.openweathermap.org/data/2.5/find?units=metric&q=Vimperk,cz&appid=3f9ed61a70b43a7d7f2913f40ff2d4eb');
+        const fetchedPrague = await fetch('http://api.openweathermap.org/data/2.5/find?units=metric&q=Prague,cz&appid=1b4ffc9a1109ae46e5cc623d293edc69');
+        const fetchedVimperk = await fetch('http://api.openweathermap.org/data/2.5/find?units=metric&q=Vimperk,cz&appid=1b4ffc9a1109ae46e5cc623d293edc69');
         const resultPrague = await fetchedPrague.json();
         const resultVimperk = await fetchedVimperk.json();
 
@@ -56,8 +56,8 @@ async function insertWeather() {
 }
 
 function run() {
-    //setTimeout(insertCovid, 60 * 1000);
-    //setTimeout(insertWeather, 70 * 1000);
+    setTimeout(insertCovid, 60 * 1000);
+    setTimeout(insertWeather, 70 * 1000);
 }
 
 module.exports.run = run;

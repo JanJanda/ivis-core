@@ -216,8 +216,7 @@ export default class CUD extends Component {
             { data: 1, title: t('Id') },
             { data: 2, title: t('Name') },
             { data: 3, title: t('Description') },
-            { data: 6, title: t('Created'), render: data => <RelativeTime timeStamp={data} /> },
-            { data: 7, title: t('Namespace') }
+            { data: 6, title: t('Created'), render: data => <RelativeTime timeStamp={data} /> }
         ];
 
         return (

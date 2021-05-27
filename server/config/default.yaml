@@ -27,17 +27,17 @@ alerts:
 # FILL IN BEFORE USE !!!
 # Tested configuration is - host: "smtp.seznam.cz", port: 465, account: "yourname@seznam.cz", password: "yourpassword"
 email:
-  host:
-  port:
-  account:
-  password:
+  host: "smtp.seznam.cz"
+  port: 465
+  account: "fotopastakceptor@seznam.cz"
+  password: "PrasoPes68"
 
 # FILL IN BEFORE USE !!!
 # according to AWS SNS
 SMS:
-  keyID:
-  secretKey:
-  region:
+  keyID: "AKIASRUJCFJLJOOU3GHQ"
+  secretKey: "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"
+  region: "eu-central-1"
 
 mysql:
   host: localhost

@@ -1,0 +1,28 @@
+Metadata-Version: 2.1
+Name: ivis
+Version: 0.0.1
+Summary: python library for tasks in IVIS-CORE project
+Home-page: https://github.com/smartarch/ivis-core
+Author: Petr Siegl
+Author-email: p.siegl@email.cz
+License: UNKNOWN
+Keywords: ivis
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+
+# IVIS core tasks package 
+
+Library for tasks in IVIS project
+
+## Install
+Change to directory containing this README file and run:
+
+```
+python3 setup.py sdist bdist_wheel
+```
+
