@@ -63,11 +63,12 @@ export default class List extends Component {
             { data: 2, title: t('Description') },
             { data: 3, title: t('Enabled'), render: data => data === 1 ? t('Yes') : t('No') },
             { data: 4, title: t('Created'), render: data => <RelativeTime timeStamp={data} /> },
-            { data: 5, title: t('Namespace') },
+            { data: 5, title: t('Signal set') },
+            { data: 6, title: t('Namespace') },
             { title: t('Actions'),
                 actions: data => {
                     const actions = [];
-                    const perms = data[6];
+                    const perms = data[7];
 
                     if (perms.includes('edit')) {
                         actions.push({

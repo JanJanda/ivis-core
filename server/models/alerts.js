@@ -31,8 +31,8 @@ async function listDTAjax(context, params) {
         context,
         [{ entityTypeId: 'alert', requiredOperations: ['view'] }],
         params,
-        builder => builder.from('alerts').innerJoin('namespaces', 'namespaces.id', 'alerts.namespace'),
-        [ 'alerts.id', 'alerts.name', 'alerts.description', 'alerts.enabled', 'alerts.created', 'namespaces.name' ]
+        builder => builder.from('alerts').innerJoin('namespaces', 'namespaces.id', 'alerts.namespace').innerJoin('signal_sets', 'signal_sets.id', 'alerts.sigset'),
+        [ 'alerts.id', 'alerts.name', 'alerts.description', 'alerts.enabled', 'alerts.created', 'signal_sets.name', 'namespaces.name' ]
     );
 }
 
