@@ -50,8 +50,8 @@ async function setupFakeScope(sigSetId){
         scope['$' + item.cid] = tmp;
         recordMock[item.cid] = tmp;
     });
-    scope['$id'] = '9';
-    recordMock['id'] = '9';
+    scope['$_id'] = '9';
+    recordMock['_id'] = '9';
 
     let arr = [recordMock];
     scope.past = (cid, distance) => stats.past(arr, cid, distance);
