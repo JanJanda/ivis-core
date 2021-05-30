@@ -63,7 +63,7 @@ class Alert{
         }
         else if (this.fields.repeat !== newFields.repeat) {
             clearTimeout(this.repeatClock);
-            if (newFields.repeat !== 0 && (this.fields.state === 'bad' || this.fields.state === 'better')) this.repeatClock = setTimeout(this.repeatNotification.bind(this), this.fields.repeat * 60 * 1000);
+            if (newFields.repeat !== 0 && (this.fields.state === 'bad' || this.fields.state === 'better')) this.repeatClock = setTimeout(this.repeatNotification.bind(this), newFields.repeat * 60 * 1000);
         }
 
         let sit = false;
